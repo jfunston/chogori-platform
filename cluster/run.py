@@ -3,7 +3,7 @@
 '''
 MIT License
 
-Copyright (c) 2020 Futurewei Cloud
+Copyright (c) 2021 Futurewei Cloud
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,19 +24,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 '''
 
-import parse
 import argparse
-from fabric import Connection
+import parse, clusterstate
+#from fabric import Connection
+
 
 parser = argparse.ArgumentParser(description="Utility script to start/stop/kill cluster components")
-parser.add_argument("--config_file", help="Top-level config file that specifices a Chogori cluster")
-parser.add_argument("--locals_file", help="Top-level config file that specifices local environment")
+parser.add_argument("--config_file", default="configs/cluster.cfg", help="Top-level config file that specifices a Chogori cluster")
+parser.add_argument("--state_file", default="state.p", help="Python pickle file of current cluster state")
 parser.add_argument("--username", default="user", help="Username to use when SSHing to other nodes")
 parser.add_argument("--start", nargs="*", default="", help="List of component names (from config_file) to be started")
 parser.add_argument("--remove", nargs="*", default="", help="List of component names (from config_file) to be removed")
 parser.add_argument("--stop", nargs="*", default="", help="List of component names (from config_file) to be stopped")
 parser.add_argument("--logs", nargs="*", default="", help="List of component names (from config_file) to display logs")
+parser.add_argument("--state", nargs="?", const=False, default=True, help="Show the cluster state")
+parser.add_argument("--dry_run", nargs="?", const=False, default=True, help="Change the assumed cluster state without running any ssh commands")
 args = parser.parse_args()
+
+assignment = clusterstate.load_state(args.state_file)
+
 
 args.config_file
 runnables = parse.parseConfig(args.locals_file, args.config_file)
