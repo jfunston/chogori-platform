@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 
 # The smallest unit of deployment target. It is comprised of a single
@@ -31,14 +31,4 @@ host_nodes: List[HostNode] = [
     HostNode("server-9.mydomain.com", "192.168.1.18", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
     HostNode("server-10.mydomain.com", "192.168.1.20", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A")]
 
-CPO_PORT_BASE = 7000
-TSO_PORT_BASE = 8000
-PERSIST_PORT_BASE = 4000
-NODEPOOL_PORT_BASE = 10000
-
-DOCKER_REGISTRY_HOST = "docker.mydomain.com"
-CLIENT_IMAGE = f"{DOCKER_REGISTRY_HOST}/bench_client:latest"
-CPO_IMAGE = f"{DOCKER_REGISTRY_HOST}/cpo:latest"
-TSO_IMAGE = f"{DOCKER_REGISTRY_HOST}/tso:latest"
-PERSIST_IMAGE = f"{DOCKER_REGISTRY_HOST}/persist:latest"
-NODEPOOL_IMAGE = f"{DOCKER_REGISTRY_HOST}/nodepool:latest"
+port_bases: dict[str, int] = {"cpo": 7000, "tso": 8000, "persist": 4000, "nodepool": 10000}

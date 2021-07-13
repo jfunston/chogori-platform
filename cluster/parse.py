@@ -102,12 +102,15 @@ def parseConfig(config_filename):
     all_to_run = []
 
     for section in config.sections():
+        if section == "LocalConfig":
+            continue
+
         for i in range(0, int(config[section]["hosts"])):
             runnable = Runnable()
             runnable.component = section
             runnable.name = f"{section}{i}"
             runnable.target_config = config[section]["host_config"]
-            cpus = int(config[section][cpus])
+            cpus = int(config[section]["cpus"])
             parseRunnableConfig(runnable, config[section]["configs"], cpus)
             all_to_run.append(runnable)
 
