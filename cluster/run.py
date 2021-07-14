@@ -29,8 +29,8 @@ import argparse
 import clusterstate
 import parse
 
+from fabric import Connection
 
-# from fabric import Connection
 
 def validate_command(runnables, args):
     valid_components = [x.component for x in runnables]
@@ -41,7 +41,7 @@ def validate_command(runnables, args):
 
 parser = argparse.ArgumentParser(description="Utility script to start/stop/kill cluster components")
 parser.add_argument("--config_file", default="configs/cluster.cfg",
-                    help="Top-level config file that specifices a Chogori cluster")
+                    help="Top-level config file that specifies a Chogori cluster")
 parser.add_argument("--state_file", default="state.p", help="Python pickle file of current cluster state")
 parser.add_argument("--username", default="user", help="Username to use when SSHing to other nodes")
 parser.add_argument("--start", nargs="*", default=[], help="List of component names (from config_file) to be started")
@@ -56,13 +56,13 @@ args = parser.parse_args()
 runnables = parse.parseConfig(args.config_file)
 validate_command(runnables, args)
 
-assignment = clusterstate.load_state(args.state_file)
+assignment = clusterstate.Assignment(args.state_file)
 
 for r in runnables:
     pull_cmd = ""
     cmd = ""
     if r.component in args.start or "all" in args.start:
-        clusterstate.add_runnable(assignment, r)
+        assignment.add_runnable(r)
         print("Starting:")
         print(r.getDockerRun())
         pull_cmd = r.getDockerPull()
@@ -76,7 +76,7 @@ for r in runnables:
         print(r)
         cmd = r.getDockerLogs()
     if r.component in args.remove or "all" in args.remove:
-        clusterstate.remove_runnable(assignment, r)
+        assignment.remove_runnable(r)
         print("Removing:")
         print(r)
         cmd = r.getDockerRemove()
@@ -91,7 +91,7 @@ for r in runnables:
 
 print(args.state)
 if args.state:
-    for x in assignment:
-        print(x[1])
+    for x in assignment.assignment:
+        print(x.runnable)
 
-clusterstate.save_state(args.state_file, assignment)
+assignment.save_state(args.state_file)

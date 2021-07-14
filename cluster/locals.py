@@ -31,4 +31,4 @@ host_nodes: List[HostNode] = [
     HostNode("server-9.mydomain.com", "192.168.1.18", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A"),
     HostNode("server-10.mydomain.com", "192.168.1.20", [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "mlx5_0", "A")]
 
-port_bases: dict[str, int] = {"cpo": 7000, "tso": 8000, "persist": 4000, "nodepool": 10000}
+port_bases: Dict[str, int] = {"cpo": 7000, "tso": 8000, "persist": 4000, "nodepool": 10000}
