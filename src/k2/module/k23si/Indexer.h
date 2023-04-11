@@ -41,8 +41,8 @@ Copyright(c) 2022 Futurewei Cloud
 
 namespace k2 {
 
-// the type holding multiple committed versions of a key
-typedef std::deque<dto::DataRecord> VersionsT;
+// the type holding multiple access records of a key
+typedef std::deque<dto::AccessRecord> VersionsT;
 
 // A key in the indexer. Since this is a schema-aware indexer, we only need to store the pkey and the rkey
 struct IndexerKey {
@@ -53,38 +53,17 @@ struct IndexerKey {
     K2_DEF_FMT(IndexerKey, partitionKey, rangeKey);
 };
 
-// This struct is the "value" we store for each key in the indexer and represents
-// all versions (in MVCC terms) which we have for that key
-struct VersionSet {
-    // The write intent for the key
-    std::optional<dto::WriteIntent> WI;
-    // all committed versions, sorted in timestamp-decreasing order
-    VersionsT committed;
-
-    // Use to check if there is any data stored in this VSet (WI or committed)
-    bool empty() const;
-
-    // This timestamp represents the last time when there was a read for this key. This is used
-    // to prevent mutations ot observed history which is required for
-    // the consistency guarantees in the K23SI transaction protocol
-    dto::Timestamp lastReadTime{dto::Timestamp::ZERO};
-
-    // a static vset used to represent an empty container
-    static const VersionSet EMPTY;
-};
-inline const VersionSet VersionSet::EMPTY{};
-
 // Sorted Key indexer used to map key->vset. It also provides the last observed times at its lowest and highest bounds
 struct KeyIndexer {
-    // the last time we observed the lowest bound (a virtual key smaller than all other keys)
-    dto::Timestamp lastReadTimeLow{dto::Timestamp::ZERO};
-    // the last time we observed the highes bound (a virtual key bigger than all other keys)
-    dto::Timestamp lastReadTimeHigh{dto::Timestamp::ZERO};
+    // the read intents on the lowest bound (a virtual key smaller than all other keys)
+    VersionsT lowerBoundRIs;
+    // the read intents on the upper bound (a virtual key bigger than all other keys)
+    VersionsT upperBoundRIs;
     // the type holding versions for all keys, i.e. the implementation for this key indexer
     #if K2_MODULE_POOL_ALLOCATOR == 1
-    typedef std::map<IndexerKey, VersionSet, std::less<IndexerKey>, __gnu_cxx::__pool_alloc<std::pair<IndexerKey, VersionSet>>> KeyIndexerT;
+    typedef std::map<IndexerKey, VersionsT, std::less<IndexerKey>, __gnu_cxx::__pool_alloc<std::pair<IndexerKey, VersionsT>>> KeyIndexerT;
     #else
-    typedef std::map<IndexerKey, VersionSet> KeyIndexerT;
+    typedef std::map<IndexerKey, VersionsT> KeyIndexerT;
     #endif
     // the implementation container for storing key->vset
     KeyIndexerT impl;
@@ -95,9 +74,7 @@ struct KeyIndexer {
 // The indexer for K2 records. It stores records, mapped as: IndexerKey --> dto::DataRecord
 class Indexer {
 public: // lifecycle
-    // The Indexer must be started with a timestamp which indicates when it was created.
-    // This timestamp is used to track observations for elements in the indexer.
-    seastar::future<> start(dto::Timestamp createdTs);
+    seastar::future<> start();
 
     // The Indexer must be stopped before it is destroyed to allow for various state to be safely closed.
     seastar::future<> stop();
@@ -123,9 +100,6 @@ public: // API
     const SchemaIndexer& getSchemaIndexer() const;
 
 private:
-    // the time at which the indexer got created. This will be the assumed observed time for any keys we do not have
-    dto::Timestamp _createdTs{dto::Timestamp::ZERO};
-
     // the indexer, mapping schema_name -> indexer_for_schema
     SchemaIndexer _schemaIndexer;
 }; // class KeyIndexer
@@ -145,40 +119,12 @@ public:
     Iterator(KeyIndexer::iterator beforeIt, KeyIndexer::iterator foundIt, KeyIndexer::iterator afterIt, KeyIndexer& si, bool reverse, String schemaName);
 
 public: // APIs
-    // returns the time of the last observation(read) on the key associated with the current Iterator position
-    dto::Timestamp getLastReadTime() const;
-
-    // returns the time of the last committed value, or ZERO if there are no committed values at the current Iterator position
-    dto::Timestamp getLastCommittedTime() const;
-
-    // get the latest DataRecord for the current Iterator position, either WI or committed.
-    // Return nullptr if there are no values present (WI or otherwise)
-    dto::DataRecord* getLatestDataRecord() const;
-
-    // get the WriteIntent for the current Iterator position
-    dto::WriteIntent* getWI() const;
-
     // get a copy of all data records at the current Iterator position (Debug API)
-    std::vector<dto::DataRecord> getAllDataRecords() const;
+    std::vector<dto::AccessRecord> getAllDataRecords() const;
 
-    // For the current Iterator position, return the correct record for a read done from a transaction
-    // with the given timestamp, and a flag indicating if there was a conflict with the existing write intent
-    // More formally, get the data record which is either
-    // - a write intent from the same transaction (same timestamp), or
-    // - committed record, not newer than the given timestamp
-    // returns (nullptr, false) if no data record is found at this timestamp and there was no conflicting WI.
-    // returns (pointerToWI, true) if a conflicting WI was found at this timestamp.
-    std::tuple<dto::DataRecord*, bool> getDataRecordAt(dto::Timestamp ts);
+    VersionsT* getAccessRecords();
 
-    // Add, abort or commit the WI at the current Iterator position
-    void addWI(const dto::Key& key, dto::DataRecord&& rec, uint64_t request_id);
-    void abortWI();
-    void commitWI();
-
-    // register an observation at the current Iterator position from a transaction with the given timestamp
-    void observeAt(dto::Timestamp ts);
-
-    // use to determine if the current Iterator position contains any data records (wi or committed)
+    // use to determine if the current Iterator position contains any access records
     bool hasData() const;
 
     // move on to the next position

@@ -1488,4 +1488,108 @@ seastar::future<> K23SIPartitionModule::_recovery() {
 dto::OwnerPartition& K23SIPartitionModule::getOwnerPartition() {
     return this->_partition;
 }
+
+class DependencyGraph {
+    std::unordered_set<TxnID> committedTxns;
+
+    // txn -> list of txns that are ordered after it.
+    AdjacencyList forwardEdges;
+    // txn -> list of txns that are ordered before it.
+    AdjacencyList backwardEdges;
+
+    uint64_t activeTxns{1};
+    friend class DependencyManager;
+
+public:
+    // Remove txn from graph due to abort. All local read and write intents should be removed before calling this.
+    void abortTxn(TxnID txnID);
+    // Marks txn as committed but does not remove from graph.
+    void commitTxn(TxnID txnID);
+    DependencyType getDependency(TxnID from, TxnID to);
+    // Adds a forward dependency 'from' to 'to', and corresponding reverse dependency. Both must already exist in graph
+    void addDependency(TxnID from, TxnID to);
+};
+
+void DependencyGraph::abortTxn(TxnId txnID) {
+    --activeTxns;
+
+    forwardEdges.remove(txnID);
+    backwardEdges.remove(txnID);
+
+    for (auto& edgeList : forwardEdges) {
+        edgeList.remove(txnID);
+    }
+    for (auto& edgeList : backwardEdges) {
+        edgeList.remove(txnID);
+    }
+}
+
+void DependencyGraph::commitTxn(TxnID txnID) {
+    --activeTxns;
+    committedTxns.insert(txnID);
+}
+
+DependencyType DependencyGraph::getDependency(TxnID from, TxnID to) {
+    bool foundForward = false;
+
+    auto forwardIt = forwardEdges.find(from);
+    if (forwardIt != forwardEdges.end()) {
+        auto depIt = forwardIt->second.find(to);
+        if (depIt != forwardIt->second.end()) {
+            foundForward = true;
+        }
+    }
+
+    auto backwardIt = backwardEdges.find(from);
+    if (backwardIt != backwardEdges.end()) {
+        auto depIt = backwardIt->second.find(to);
+        if (depIt != backwardIt->second.end()) {
+            return foundForward ? DependencyType::Conflict : DependencyType::Backward;
+        }
+    }
+
+    return foundForward ? DependencyType::Forward : DependencyType::None;
+}
+
+void DependencyGraph::addDependency(TxnID from, TxnID to) {
+    forwardEdges[from].insert(to);
+    backwardEdges[to].insert(from);
+}
+
+void mergeEdgeLists(AdjacencyList& into, AdjacencyList& other) {
+    for (auto it = other.begin(); it != other.end(); ++it) {
+        for (const auto& edge : it->second) {
+            into[it->first].insert(edge);
+        }
+    }
+}
+
+TxnID DependencyManager::mergeGraphs(TxnID a, TxnID b) {
+    TxnID mergedID = std::min(a, b);
+    TxnID otherID = std::max(a, b);
+    DependencyGraph& merged = graphs[mergedID];
+    DependencyGraph& other = graphs[otherID];
+
+    merged.activeTxns += other.atciveTxns;
+    merged.committedTxns.reserve(merged.committedTxns.size() + other.committedTxns.size());
+    for (const auto& otherCommitted : other.committedTxns) {
+        merged.committedTxns.insert(otherCommitted);
+    }
+
+    mergeEdgeLists(merged.forwardEdges, other.forwardEdges);
+    mergeEdgeLists(merged.backwardEdges, other.backwardEdges);
+
+    graphs.erase(otherID);
+    return mergedID;
+}
+
+bool DependencyManager::checkRemoveGraph(TxnID ID) {
+    if (graphs[ID].activeTxns == 0) {
+        graphs.erase(ID);
+        return true;
+    }
+
+    return false;
+}
+
 }  // ns k2

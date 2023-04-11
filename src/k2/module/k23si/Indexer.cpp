@@ -43,15 +43,8 @@ bool IndexerKey::operator<(const IndexerKey& o) const noexcept {
 }
 // *********************** end IndexerKey API
 
-// *********************** VersionSet API
-bool VersionSet::empty() const {
-    return !WI.has_value() && committed.empty();
-}
-// *********************** end VersionSet API
-
 // *********************** Indexer API
-seastar::future<> Indexer::start(dto::Timestamp createdTs) {
-    _createdTs = createdTs;
+seastar::future<> Indexer::start() {
     return seastar::make_ready_future();
 }
 
@@ -104,98 +97,36 @@ Indexer::Iterator::Iterator(KeyIndexer::iterator beforeIt, KeyIndexer::iterator 
     _beforeIt(beforeIt), _foundIt(foundIt), _afterIt(afterIt), _si(si), _reverse(reverse), _schemaName(schemaName) {
 }
 
-// returns the time of the last observation(read) on the key associated with this Iterator.
-dto::Timestamp Indexer::Iterator::getLastReadTime() const {
-    // 1. this Iterator points to a an existing key. Return the stored ts
-    if (_foundIt != _si.impl.end()) {
-        return _foundIt->second.lastReadTime;
-    }
-    // 2. this Iterator points to a non-existing key. Return the min(neighborLow, neighborHigh).
-    auto nlow = _beforeIt == _si.impl.end() ? _si.lastReadTimeLow : _beforeIt->second.lastReadTime;
-    auto nhigh = _afterIt == _si.impl.end() ? _si.lastReadTimeHigh : _afterIt->second.lastReadTime;
-    return nlow.min(nhigh);
-}
-
-// returns the time of the last committed value, or ZERO if there are no committed values
-dto::Timestamp Indexer::Iterator::getLastCommittedTime() const {
-    if (_foundIt != _si.impl.end() && _foundIt->second.committed.size() > 0) {
-        return _foundIt->second.committed[0].timestamp;
-    }
-    return dto::Timestamp::ZERO;
-}
-
-// get the latest DataRecord in this Iterator, either WI or committed.
-// Return nullptr if there are no values present (WI or otherwise)
-dto::DataRecord* Indexer::Iterator::getLatestDataRecord() const {
-    if (_foundIt == _si.impl.end()) {
-        return nullptr;
-    }
-    if (_foundIt->second.WI.has_value()) {
-        return &(_foundIt->second.WI->data);
-    } else if (_foundIt->second.committed.size() > 0) {
-        return &(_foundIt->second.committed[0]);
-    }
-    return nullptr;
-}
-
-dto::WriteIntent* Indexer::Iterator::getWI() const {
-    if (_foundIt != _si.impl.end() && _foundIt->second.WI.has_value()) {
-        return &(_foundIt->second.WI.value());
-    }
-    return nullptr;
-}
-
-std::vector<dto::DataRecord> Indexer::Iterator::getAllDataRecords() const {
-    std::vector<dto::DataRecord> result;
+std::vector<dto::AccessRecord> Indexer::Iterator::getAllDataRecords() const {
+    std::vector<dto::AccessRecord> result;
     if (_foundIt == _si.impl.end()) {
         return result;
     }
-    result.reserve(1 + _foundIt->second.committed.size());
-    auto* wi = getWI();
-    if (wi) {
-        dto::DataRecord copy{
-            .value = wi->data.value.share(),
-            .timestamp = wi->data.timestamp,
-            .isTombstone = wi->data.isTombstone};
+    result.reserve(_foundIt->second.size());
 
-        result.push_back(std::move(copy));
-    }
-
-    for (auto& rec : _foundIt->second.committed) {
-        dto::DataRecord copy{
-            .value = rec.value.share(),
-            .timestamp = rec.timestamp,
-            .isTombstone = rec.isTombstone};
-
+    for (auto& rec : _foundIt->second) {
+        dto::AccessRecord copy{};
+        copy.txnID = rec.TxnId;
+        copy.accessType = rec.accessType;
+        copy.requestID = rec.requestID;
+        if (rec.data.has_value()) {
+            dto::DataRecord data{
+                .value = rec.value.share(),
+                .timestamp = rec.timestamp,
+                .isTombstone = rec.isTombstone};
+            copy.data = std::move(data);
+        }
         result.push_back(std::move(copy));
     }
     return result;
 }
 
-std::tuple<dto::DataRecord*, bool> Indexer::Iterator::getDataRecordAt(dto::Timestamp ts) {
-    if (_foundIt == _si.impl.end()) {
-        return std::make_tuple(nullptr, false);
-    }
-    if (auto* wi = getWI(); wi) {
-        auto comp = wi->data.timestamp.compareCertain(ts);
-        if (comp == dto::Timestamp::EQ) {
-            // WI is from same transaction
-            return std::make_tuple(&(wi->data), false);
-        }
-        if (comp == dto::Timestamp::LT) {
-            // WI is older than ts which means a conflicting transaction
-            return std::make_tuple(&(wi->data), true);
-        }
-        // we have a WI but it is newer than the timestamp - fallthrough
+VersionsT* Indexer::Iterator::getAccessRecords() {
+    if (hasData()) {
+        return &(_foundIt->second);
     }
 
-    // return the first record we can find which is older than the given timestamp
-    for (auto& rec: _foundIt->second.committed) {
-        if (rec.timestamp.compareCertain(ts) <= 0) {
-            return std::make_tuple(&rec, false);
-        }
-    }
-    return std::make_tuple(nullptr, false);
+    return nullptr;
 }
 
 void Indexer::Iterator::addWI(const dto::Key& key, dto::DataRecord&& rec, uint64_t request_id) {

@@ -84,15 +84,19 @@ struct hash<k2::dto::K23SI_MTR> {
 
 namespace k2::dto {
 
+K2_DEF_ENUM(AccessRecordType,
+    WriteIntent,
+    ReadIntent,
+    CommittedValue,
+    CleanedValue
+);
+
 // The core data needed by any 3SI record version, used by both write intents and
 // committed records. It is split into a separate struct so that code can more easily
 // be written to handle both write intents and committed records.
 struct DataRecord {
     // the user data for the record
     SKVRecord::Storage value;
-
-    // the record transaction id/ timestamp
-    Timestamp timestamp;
 
     // marked for tombstones
     bool isTombstone = false;
@@ -101,17 +105,14 @@ struct DataRecord {
     K2_DEF_FMT(DataRecord, value, timestamp, isTombstone);
 };
 
-// A write intent. This is separate from the DataRecord structure which is used for
-// committed records because a write intent needs to store more information.
-struct WriteIntent {
-    DataRecord data;
+struct AccessRecord {
+    std::optional<DataRecord> data;
+    Timestamp txnID;
+    uint64_t requestID;
+    AcessRecordType recordType;
 
-    // The request_id as given to the server by the client, it is used to
-    // provide idempotent behavior in the case of retries
-    uint64_t request_id = 0;
-
-    K2_PAYLOAD_FIELDS(data, request_id);
-    K2_DEF_FMT(WriteIntent, data, request_id);
+    K2_PAYLOAD_FIELDS(data, txnID, requestID, recordType);
+    K2_DEF_FMT(AccessRecord, data, txnID, requestID, recordType);
 };
 
 // The transaction states for K23SI transactions.
