@@ -1552,8 +1552,19 @@ DependencyType DependencyGraph::getDependency(TxnID from, TxnID to) {
 }
 
 void DependencyGraph::addDependency(TxnID from, TxnID to) {
+    // Direct forward edge
     forwardEdges[from].insert(to);
+    // Transitive edges
+    for (const auto& trans : forwardEdges[to]) {
+        forwardEdges[from].insert(trans);
+    }
+
+    // Direct reverse edge
     backwardEdges[to].insert(from);
+    // Transitive edges
+    for (const auto& trans : backwardEdges[from]) {
+        backwardEdges[to].insert(trans);
+    }
 }
 
 void mergeEdgeLists(AdjacencyList& into, AdjacencyList& other) {

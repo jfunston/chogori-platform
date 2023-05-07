@@ -40,6 +40,51 @@ Copyright(c) 2020 Futurewei Cloud
 
 namespace k2 {
 
+typedef std::unordered_map<dto:Timestamp, std::unordered_set<dto::Timestamp>> AdjacencyList;
+
+enum class DependencyType {
+    None,
+    Forward,
+    Backward,
+    Conflict // Forward and backward edges are both in graph
+};
+
+using TxnID = dto::Timestamp;
+
+class DependencyGraph {
+    std::unordered_set<TxnID> committedTxns;
+
+    // txn -> list of txns that are ordered after it.
+    AdjacencyList forwardEdges;
+    // txn -> list of txns that are ordered before it.
+    AdjacencyList backwardEdges;
+
+    uint64_t activeTxns{1};
+    friend class DependencyManager;
+
+public:
+    // Remove txn from graph due to abort. All local read and write intents should be removed before calling this.
+    void abortTxn(TxnID txnID);
+    // Marks txn as committed but does not remove from graph.
+    void commitTxn(TxnID txnID);
+    DependencyType getDependency(TxnID from, TxnID to);
+    // Adds a forward dependency 'from' to 'to', and corresponding reverse dependency, and all transitive dependencies
+    // Both must already exist in graph
+    void addDependency(TxnID from, TxnID to);
+};
+
+class DependencyManager {
+    std::unordered_map<TxnID, DependencyGraph> graphs;
+public:
+    // Merge graphs of graphIDs 'a' and 'b'. Higher ID will be merged into lower ID.
+    // Both graphs must already exist and not be already merged. Returns ID of merged graph.
+    // The graph that was merged from (as opposed to merged into) will be deleted.
+    TxnID mergeGraphs(TxnID a, TxnID b);
+
+    // Checks if a graph has no active txns and if so removes it. Returns true if it was removed.
+    bool checkRemoveGraph(TxnID ID);
+};
+
 class K23SIPartitionModule {
 public: // lifecycle
     K23SIPartitionModule(dto::CollectionMetadata cmeta, dto::Partition partition, String cpoEndpoint);
@@ -212,6 +257,8 @@ private:  // members
     // manage write intent metadata records as a participant
     TxnWIMetaManager _twimMgr;
 
+    DependencyManager _dependencyMgr;
+
     // schema name -> (schema version -> schema)
     std::unordered_map<String, std::unordered_map<uint32_t, std::shared_ptr<dto::Schema>>> _schemas;
 
@@ -244,51 +291,5 @@ private:  // members
     k2::ExponentialHistogram _queryPageScans;
     k2::ExponentialHistogram _queryPageReturns;
 };
-
-
-typedef std::unordered_map<dto:Timestamp, std::unordered_set<dto::Timestamp>> AdjacencyList;
-
-enum class DependencyType {
-    None,
-    Forward,
-    Backward,
-    Conflict // Forward and backward edges are both in graph
-};
-
-using TxnID = dto::Timestamp;
-
-class DependencyGraph {
-    std::unordered_set<TxnID> committedTxns;
-
-    // txn -> list of txns that are ordered after it.
-    AdjacencyList forwardEdges;
-    // txn -> list of txns that are ordered before it.
-    AdjacencyList backwardEdges;
-
-    uint64_t activeTxns{1};
-    friend class DependencyManager;
-
-public:
-    // Remove txn from graph due to abort. All local read and write intents should be removed before calling this.
-    void abortTxn(TxnID txnID);
-    // Marks txn as committed but does not remove from graph.
-    void commitTxn(TxnID txnID);
-    DependencyType getDependency(TxnID from, TxnID to);
-    // Adds a forward dependency 'from' to 'to', and corresponding reverse dependency. Both must already exist in graph
-    void addDependency(TxnID from, TxnID to);
-};
-
-class DependencyManager {
-    std::unordered_map<TxnID, DependencyGraph> graphs;
-public:
-    // Merge graphs of graphIDs 'a' and 'b'. Higher ID will be merged into lower ID.
-    // Both graphs must already exist and not be already merged. Returns ID of merged graph.
-    // The graph that was merged from (as opposed to merged into) will be deleted.
-    TxnID mergeGraphs(TxnID a, TxnID b);
-
-    // Checks if a graph has no active txns and if so removes it. Returns true if it was removed.
-    bool checkRemoveGraph(TxnID ID);
-};
-
 
 }  // ns k2
